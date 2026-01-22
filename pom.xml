@@ -15,7 +15,7 @@
 	<artifactId>parent</artifactId>
 	<packaging>pom</packaging>
 	<version>${teastoreversion}</version>
-	
+
 	<modules>
 		<module>interfaces/tools.descartes.teastore.entities</module>
 		<module>./utilities/tools.descartes.teastore.kieker.probes</module>
@@ -29,7 +29,7 @@
 		<module>services/tools.descartes.teastore.registry</module>
 		<module>services/tools.descartes.teastore.auth</module>
 		<module>services/tools.descartes.teastore.webui</module>
-		<module>./utilities/tools.descartes.teastore.docker.all</module>
+		<!-- <module>./utilities/tools.descartes.teastore.docker.all</module> -->
 	</modules>
 
 	<build>
