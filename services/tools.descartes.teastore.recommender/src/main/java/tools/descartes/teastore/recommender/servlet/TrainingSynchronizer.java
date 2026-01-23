@@ -19,10 +19,11 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAccessor;
-import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -97,6 +98,8 @@ public final class TrainingSynchronizer {
 
 	private static final Logger LOG = LoggerFactory.getLogger(TrainingSynchronizer.class);
 
+	private static final ZoneId SYSTEM_ZONE = ZoneId.systemDefault();
+
 	/**
 	 * The maximum considered time in milliseconds. DEFAULT_MAX_TIME_VALUE signals
 	 * no entry, e.g. all orders are used for training.
@@ -139,8 +142,8 @@ public final class TrainingSynchronizer {
 						client -> client.getService().path(client.getApplicationURI()).path(client.getEndpointURI())
 								.path("finished").request().get());
 
-								if (result != null && Boolean.parseBoolean(result.readEntity(String.class))) {
-									break;
+				if (result != null && Boolean.parseBoolean(result.readEntity(String.class))) {
+					break;
 				}
 			} catch (NullPointerException | NotFoundException | LoadBalancerTimeoutException e) {
 				// continue waiting as usual
@@ -218,18 +221,24 @@ public final class TrainingSynchronizer {
 		for (Response response : maxTimeResponses) {
 			if (response == null) {
 				LOG.warn("One service response was null and is therefore not available for time-check.");
-			} else if (response.getStatus() == Response.Status.OK.getStatusCode()) {
-				// only consider if status was fine
-				long milliTS = response.readEntity(Long.class);
-				if (maxTime != TrainingSynchronizer.DEFAULT_MAX_TIME_VALUE && maxTime != milliTS) {
-					LOG.warn("Services disagree about timestamp: " + maxTime + " vs " + milliTS
-							+ ". Therfore using the minimum.");
+				continue;
+			}
+			try {
+				if (response.getStatus() == Response.Status.OK.getStatusCode()) {
+					// only consider if status was fine
+					long milliTS = response.readEntity(Long.class);
+					if (maxTime != TrainingSynchronizer.DEFAULT_MAX_TIME_VALUE && maxTime != milliTS) {
+						LOG.warn("Services disagree about timestamp: " + maxTime + " vs " + milliTS
+								+ ". Therfore using the minimum.");
+					}
+					maxTime = Math.min(maxTime, milliTS);
+				} else {
+					// release connection by buffering entity
+					response.bufferEntity();
+					LOG.warn("Service " + response + "was not available for time-check.");
 				}
-				maxTime = Math.min(maxTime, milliTS);
-			} else {
-				// release connection by buffering entity
-				response.bufferEntity();
-				LOG.warn("Service " + response + "was not available for time-check.");
+			} finally {
+				response.close();
 			}
 		}
 		if (maxTime == Long.MIN_VALUE) {
@@ -243,34 +252,22 @@ public final class TrainingSynchronizer {
 	}
 
 	private void filterForMaxtimeStamp(List<OrderItem> orderItems, List<Order> orders) {
-		// filter orderItems and orders and ignore newer entries.
-		List<Order> remove = new ArrayList<>();
-		for (Order or : orders) {
-			if (toMillis(or.getTime()) > maxTime) {
-				remove.add(or);
-			}
-		}
-		orders.removeAll(remove);
+		// Filter orders (in place) and build set of remaining order IDs.
+		orders.removeIf(or -> toMillis(or.getTime()) > maxTime);
 
-		List<OrderItem> removeItems = new ArrayList<>();
-		for (OrderItem orderItem : orderItems) {
-			boolean contained = false;
-			for (Order or : orders) {
-				if (or.getId() == orderItem.getOrderId()) {
-					contained = true;
-				}
-			}
-			if (!contained) {
-				removeItems.add(orderItem);
-			}
+		Set<Long> validOrderIds = new HashSet<>(Math.max(16, (int) (orders.size() / 0.75f) + 1));
+		for (Order or : orders) {
+			validOrderIds.add(or.getId());
 		}
-		orderItems.removeAll(removeItems);
+
+		// Filter orderItems (in place) based on the orderId set.
+		orderItems.removeIf(orderItem -> !validOrderIds.contains(orderItem.getOrderId()));
 	}
 
 	private long toMillis(String date) {
 		TemporalAccessor temporalAccessor = DateTimeFormatter.ISO_LOCAL_DATE_TIME.parse(date);
 		LocalDateTime localDateTime = LocalDateTime.from(temporalAccessor);
-		ZonedDateTime zonedDateTime = ZonedDateTime.of(localDateTime, ZoneId.systemDefault());
+		ZonedDateTime zonedDateTime = ZonedDateTime.of(localDateTime, SYSTEM_ZONE);
 		Instant instant = Instant.from(zonedDateTime);
 		return instant.toEpochMilli();
 	}

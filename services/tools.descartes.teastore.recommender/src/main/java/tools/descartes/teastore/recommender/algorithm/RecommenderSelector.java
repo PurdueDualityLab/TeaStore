@@ -61,8 +61,6 @@ public final class RecommenderSelector implements IRecommender {
 
 	private static final Logger LOG = LoggerFactory.getLogger(RecommenderSelector.class);
 
-	private static RecommenderSelector instance;
-
 	private IRecommender fallbackrecommender;
 
 	private IRecommender recommender;
@@ -156,16 +154,18 @@ public final class RecommenderSelector implements IRecommender {
 	}
 
 	/**
-	 * Returns the instance of this Singleton or creates a new one, if this is the
-	 * first call of this method.
+	 * Returns the instance of this Singleton.
 	 * 
+	 * Uses the initialization-on-demand holder idiom to avoid synchronizing on every call.
+	 *
 	 * @return The instance of this class.
 	 */
-	public static synchronized RecommenderSelector getInstance() {
-		if (instance == null) {
-			 instance = new RecommenderSelector();
-		}
-		return instance;
+	public static RecommenderSelector getInstance() {
+		return Holder.INSTANCE;
+	}
+
+	private static final class Holder {
+		private static final RecommenderSelector INSTANCE = new RecommenderSelector();
 	}
 
 	/*
