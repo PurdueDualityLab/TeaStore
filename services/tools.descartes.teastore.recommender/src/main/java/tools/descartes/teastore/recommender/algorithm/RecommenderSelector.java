@@ -34,7 +34,7 @@ import tools.descartes.teastore.entities.OrderItem;
 
 /**
  * A strategy selector for the Recommender functionality.
- * 
+ *
  * @author Johannes Grohmann
  *
  */
@@ -61,79 +61,51 @@ public final class RecommenderSelector implements IRecommender {
 
 	private static final Logger LOG = LoggerFactory.getLogger(RecommenderSelector.class);
 
-	private static RecommenderSelector instance;
+	private static final RecommenderSelector INSTANCE = new RecommenderSelector();
 
-	private IRecommender fallbackrecommender;
+	private final IRecommender fallbackrecommender;
 
-	private IRecommender recommender;
+	private final IRecommender recommender;
 
 	/**
 	 * Private Constructor.
 	 */
 	private RecommenderSelector() {
 		fallbackrecommender = new PopularityBasedRecommender();
+		IRecommender selected;
 		try {
 			String recommendername = (String) new InitialContext().lookup("java:comp/env/recommenderAlgorithm");
 			// if a specific algorithm is set, we can use that algorithm
 			if (recommenders.containsKey(recommendername)) {
-				try {
-					recommender = recommenders.get(recommendername).getDeclaredConstructor().newInstance();
-				} catch (IllegalArgumentException e) {
-					e.printStackTrace();
-				} catch (InvocationTargetException e) {
-					e.printStackTrace();
-				} catch (NoSuchMethodException e) {
-					e.printStackTrace();
-				} catch (SecurityException e) {
-					e.printStackTrace();
-				}
+				selected = instantiate(recommenders.get(recommendername));
 			} else {
 				LOG.warn("Recommendername: " + recommendername
 						+ " was not found. Using default recommender (SlopeOneRecommeder).");
-				try {
-					recommender = DEFAULT_RECOMMENDER.getDeclaredConstructor().newInstance();
-				} catch (IllegalArgumentException e) {
-					e.printStackTrace();
-				} catch (InvocationTargetException e) {
-					e.printStackTrace();
-				} catch (NoSuchMethodException e) {
-					e.printStackTrace();
-				} catch (SecurityException e) {
-					e.printStackTrace();
-				}
+				selected = instantiate(DEFAULT_RECOMMENDER);
 			}
-		} catch (InstantiationException | IllegalAccessException e) {
-			// if creating a new instance fails
-			e.printStackTrace();
-			LOG.warn("Could not create an instance of the requested recommender. Using fallback.");
-			recommender = fallbackrecommender;
 		} catch (NamingException e) {
 			// if nothing was set
 			LOG.info("Recommender not set. Using default recommender (SlopeOneRecommeder).");
-			try {
-				try {
-					recommender = DEFAULT_RECOMMENDER.getDeclaredConstructor().newInstance();
-				} catch (IllegalArgumentException e1) {
-					e1.printStackTrace();
-				} catch (InvocationTargetException e1) {
-					e1.printStackTrace();
-				} catch (NoSuchMethodException e1) {
-					e1.printStackTrace();
-				} catch (SecurityException e1) {
-					e1.printStackTrace();
-				}
-			} catch (InstantiationException | IllegalAccessException e1) {
-				// also the default algorithm could fail
-				e1.printStackTrace();
-				LOG.warn("Could not create an instance of DEFAULT_RECOMMENDER " + DEFAULT_RECOMMENDER.getName() + ".");
-				recommender = fallbackrecommender;
-			}
+			selected = instantiate(DEFAULT_RECOMMENDER);
+		}
+		recommender = selected != null ? selected : fallbackrecommender;
+	}
+
+	private static IRecommender instantiate(Class<? extends IRecommender> clazz) {
+		try {
+			return clazz.getDeclaredConstructor().newInstance();
+		} catch (InstantiationException | IllegalAccessException e) {
+			e.printStackTrace();
+			LOG.warn("Could not create an instance of the requested recommender. Using fallback.");
+			return null;
+		} catch (IllegalArgumentException | InvocationTargetException | NoSuchMethodException | SecurityException e) {
+			e.printStackTrace();
+			return null;
 		}
 	}
 
 	@Override
-	public List<Long> recommendProducts(Long userid, List<OrderItem> currentItems)
-			throws UnsupportedOperationException {
+	public List<Long> recommendProducts(Long userid, List<OrderItem> currentItems) throws UnsupportedOperationException {
 		try {
 			return recommender.recommendProducts(userid, currentItems);
 		} catch (UseFallBackException e) {
@@ -156,25 +128,14 @@ public final class RecommenderSelector implements IRecommender {
 	}
 
 	/**
-	 * Returns the instance of this Singleton or creates a new one, if this is the
-	 * first call of this method.
-	 * 
+	 * Returns the instance of this Singleton.
+	 *
 	 * @return The instance of this class.
 	 */
-	public static synchronized RecommenderSelector getInstance() {
-		if (instance == null) {
-			 instance = new RecommenderSelector();
-		}
-		return instance;
+	public static RecommenderSelector getInstance() {
+		return INSTANCE;
 	}
 
-	/*
-	 * (non-Javadoc)
-	 * 
-	 * @see
-	 * tools.descartes.teastore.recommender.IRecommender#train(java.util.List,
-	 * java.util.List)
-	 */
 	@Override
 	public void train(List<OrderItem> orderItems, List<Order> orders) {
 		recommender.train(orderItems, orders);

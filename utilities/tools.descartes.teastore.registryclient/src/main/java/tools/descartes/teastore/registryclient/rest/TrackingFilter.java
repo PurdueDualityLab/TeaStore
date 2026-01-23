@@ -72,15 +72,16 @@ public class TrackingFilter implements Filter {
         }
         HttpServletRequest req = (HttpServletRequest) request;
         String sessionId = SESSION_REGISTRY.recallThreadLocalSessionId();
-        long traceId = -1L;
+        long traceId;
         int eoi;
         int ess;
 
         final String operationExecutionHeader = req.getHeader(HEADER_FIELD);
 
-        if ((operationExecutionHeader == null) || (operationExecutionHeader.equals(""))) {
-          LOG.debug("No monitoring data found in the incoming request header");
-          // LOG.info("Will continue without sending back reponse header");
+        if (operationExecutionHeader == null || operationExecutionHeader.isEmpty()) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("No monitoring data found in the incoming request header");
+          }
           traceId = CF_REGISTRY.getAndStoreUniqueThreadLocalTraceId();
           CF_REGISTRY.storeThreadLocalEOI(0);
           CF_REGISTRY.storeThreadLocalESS(1); // next operation is ess + 1
@@ -88,7 +89,8 @@ public class TrackingFilter implements Filter {
           ess = 0;
         } else {
           if (LOG.isDebugEnabled()) {
-            LOG.debug("Received request: " + req.getMethod() + "with header = " + operationExecutionHeader);
+            // Avoid string concatenation when debug is disabled.
+            LOG.debug("Received request: {} with header = {}", req.getMethod(), operationExecutionHeader);
           }
           final String[] headerArray = operationExecutionHeader.split(",");
 
@@ -122,6 +124,7 @@ public class TrackingFilter implements Filter {
             try {
               traceId = Long.parseLong(traceIdStr);
             } catch (final NumberFormatException exc) {
+              traceId = CF_REGISTRY.getUniqueTraceId();
               LOG.warn("Invalid trace id", exc);
             }
           } else {
@@ -150,7 +153,7 @@ public class TrackingFilter implements Filter {
       long traceId = CF_REGISTRY.recallThreadLocalTraceId();
       int eoi = CF_REGISTRY.recallThreadLocalEOI();
       wrappedResponse.addHeader(HEADER_FIELD,
-          traceId + "," + sessionId + "," + (eoi) + "," + Integer.toString(CF_REGISTRY.recallThreadLocalESS()));
+          traceId + "," + sessionId + "," + eoi + "," + Integer.toString(CF_REGISTRY.recallThreadLocalESS()));
       out.write(wrappedResponse.toString());
     }
   }

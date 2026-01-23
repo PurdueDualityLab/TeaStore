@@ -91,6 +91,12 @@ public abstract class AbstractUIServlet extends HttpServlet {
 	protected static final String REMOVEPRODUCT = "Product %s is removed from cart!";
 
 	/**
+	 * ObjectMapper is thread-safe after configuration and relatively expensive to create.
+	 * WebUI does cookie (de)serialization on every request; reuse a single instance.
+	 */
+	private static final ObjectMapper JSON = new ObjectMapper();
+
+	/**
 	 * Try to read the SessionBlob from the cookie. If no SessioBlob exist, a new
 	 * SessionBlob is created. If the SessionBlob is corrupted, an
 	 * IlligalStateException is thrown.
@@ -102,12 +108,12 @@ public abstract class AbstractUIServlet extends HttpServlet {
 		if (request.getCookies() != null) {
 			for (Cookie cook : request.getCookies()) {
 				if (cook.getName().equals(BLOB)) {
-					ObjectMapper o = new ObjectMapper();
 					try {
-						SessionBlob blob = o.readValue(URLDecoder.decode(cook.getValue(), "UTF-8"), SessionBlob.class);
+						SessionBlob blob = JSON.readValue(URLDecoder.decode(cook.getValue(), "UTF-8"),
+								SessionBlob.class);
 						if (blob != null) {
-						return blob;
-						} 
+							return blob;
+						}
 					} catch (IOException e) {
 						throw new IllegalStateException("Cookie corrupted!");
 					}
@@ -125,9 +131,8 @@ public abstract class AbstractUIServlet extends HttpServlet {
 	 * @param response servlet response
 	 */
 	protected void saveSessionBlob(SessionBlob blob, HttpServletResponse response) {
-		ObjectMapper o = new ObjectMapper();
 		try {
-			Cookie cookie = new Cookie(BLOB, URLEncoder.encode(o.writeValueAsString(blob), "UTF-8"));
+			Cookie cookie = new Cookie(BLOB, URLEncoder.encode(JSON.writeValueAsString(blob), "UTF-8"));
 			response.addCookie(cookie);
 		} catch (JsonProcessingException | UnsupportedEncodingException e) {
 			throw new IllegalStateException("Could not save blob!");
@@ -142,9 +147,8 @@ public abstract class AbstractUIServlet extends HttpServlet {
 	 * @param response servlet response
 	 */
 	protected void destroySessionBlob(SessionBlob blob, HttpServletResponse response) {
-		ObjectMapper o = new ObjectMapper();
 		try {
-			Cookie cookie = new Cookie(BLOB, URLEncoder.encode(o.writeValueAsString(blob), "UTF-8"));
+			Cookie cookie = new Cookie(BLOB, URLEncoder.encode(JSON.writeValueAsString(blob), "UTF-8"));
 			cookie.setMaxAge(0);
 			response.addCookie(cookie);
 		} catch (JsonProcessingException | UnsupportedEncodingException e) {

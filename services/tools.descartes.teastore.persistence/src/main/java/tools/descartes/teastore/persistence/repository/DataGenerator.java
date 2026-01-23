@@ -138,7 +138,7 @@ public final class DataGenerator {
 					"Pyramid-shaped Tea Filter, 25 pcs.", "Mr. Tea Filter, 10 pcs." },
 			{ "Medium Mesh Ball with Chain", "Medium Snap Mesh Ball", "Large Ball with Chain",
 						"Small Mesh Ball with Chain", "Small Snap Mesh Ball", "Large Snap Mesh Ball",
-						"Medium Silicone Ball Infuser", "Small Silicone Ball Infuser",
+					"Medium Silicone Ball Infuser", "Small Silicone Ball Infuser",
 					"Large Silicone Ball Infuser", "Small Mesh Ball with Panda Look", "Heart-shaped Infuser" } };
 
 	private static final String[] FIRSTNAMES = {"James", "John", "Robert", "Michael", "William", "David",
@@ -163,7 +163,11 @@ public final class DataGenerator {
 	 */
 	public static final DataGenerator GENERATOR = new DataGenerator();
 
-	private boolean maintenanceMode = false;
+	/**
+	 * Maintenance mode is checked on request paths (e.g., readiness/maintenance endpoints).
+	 * Reads should be lock-free; writes are rare.
+	 */
+	private volatile boolean maintenanceMode = false;
 
 	private DataGenerator() {
 
@@ -401,7 +405,7 @@ public final class DataGenerator {
 	 * Will return 503 on pretty much every external call in this mode.
 	 * @param maintenanceMode The maintenance flag.
 	 */
-	public synchronized void setMaintenanceModeInternal(boolean maintenanceMode) {
+	public void setMaintenanceModeInternal(boolean maintenanceMode) {
 		this.maintenanceMode = maintenanceMode;
 	}
 
