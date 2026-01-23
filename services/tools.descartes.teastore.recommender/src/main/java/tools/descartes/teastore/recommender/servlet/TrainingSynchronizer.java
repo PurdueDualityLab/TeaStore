@@ -60,7 +60,7 @@ public final class TrainingSynchronizer {
 	private static final List<Integer> PERSISTENCE_CREATION_WAIT_TIME = Arrays.asList(1000, 2000, 5000, 10000, 30000,
 			60000);
 
-	private static TrainingSynchronizer instance;
+	private static final TrainingSynchronizer INSTANCE = new TrainingSynchronizer();
 
 	private boolean isReady = false;
 
@@ -88,11 +88,8 @@ public final class TrainingSynchronizer {
 	 *
 	 * @return An instance of {@link TrainingSynchronizer}
 	 */
-	public static synchronized TrainingSynchronizer getInstance() {
-		if (instance == null) {
-			instance = new TrainingSynchronizer();
-		}
-		return instance;
+	public static TrainingSynchronizer getInstance() {
+		return INSTANCE;
 	}
 
 	private static final Logger LOG = LoggerFactory.getLogger(TrainingSynchronizer.class);
@@ -139,8 +136,8 @@ public final class TrainingSynchronizer {
 						client -> client.getService().path(client.getApplicationURI()).path(client.getEndpointURI())
 								.path("finished").request().get());
 
-								if (result != null && Boolean.parseBoolean(result.readEntity(String.class))) {
-									break;
+				if (result != null && Boolean.parseBoolean(result.readEntity(String.class))) {
+					break;
 				}
 			} catch (NullPointerException | NotFoundException | LoadBalancerTimeoutException e) {
 				// continue waiting as usual

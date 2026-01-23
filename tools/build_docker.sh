@@ -32,7 +32,7 @@ then
 	perl -i -pe's|.*FROM '"${registry}"'|FROM descartesresearch/|g' ../services/tools.descartes.teastore.*/Dockerfile
 	docker buildx rm mybuilder
 else
-	registry='descartesresearch/'
+	registry='gpt-teastore/'
 	docker buildx build -t "${registry}teastore-db" ../utilities/tools.descartes.teastore.database/ --load
 	docker buildx build -t "${registry}teastore-kieker-rabbitmq" ../utilities/tools.descartes.teastore.kieker.rabbitmq/ --load
 	docker buildx build -t "${registry}teastore-base" ../utilities/tools.descartes.teastore.dockerbase/ --load

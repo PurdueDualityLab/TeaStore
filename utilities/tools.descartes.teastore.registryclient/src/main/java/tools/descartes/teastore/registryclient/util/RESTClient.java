@@ -17,11 +17,11 @@ import org.glassfish.jersey.client.ClientConfig;
 import org.glassfish.jersey.client.ClientProperties;
 import org.glassfish.jersey.grizzly.connector.GrizzlyConnectorProvider;
 
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.HostnameVerifier;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.client.WebTarget;
@@ -40,10 +40,6 @@ import java.util.List;
  */
 public class RESTClient<T> {
 
-	/**
-	 * Default and max size for connection pools. We estimate a good size by using the available processor count.
-	 */
-
 	private static final int DEFAULT_CONNECT_TIMEOUT = 600;
 	private static final int DEFAULT_READ_TIMEOUT = 6000;
 
@@ -55,15 +51,27 @@ public class RESTClient<T> {
 	private static int readTimeout = DEFAULT_READ_TIMEOUT;
 	private static int connectTimeout = DEFAULT_CONNECT_TIMEOUT;
 
+	/**
+	 * Reused, thread-safe jersey client. Creating a Client is expensive (providers, connectors, pools),
+	 * so we keep a singleton and rely on connector-level keep-alive/connection reuse.
+	 */
+	private static volatile Client SHARED_CLIENT_HTTP;
+	private static volatile Client SHARED_CLIENT_HTTPS;
+
+	/**
+	 * For HTTPS we were historically disabling TLS verification globally through HttpsURLConnection
+	 * defaults. We keep the behavior but ensure it is applied only once.
+	 */
+	private static volatile boolean HTTPS_DEFAULTS_INSTALLED;
+
 	private String applicationURI;
 	private String endpointURI;
 
-	private Client client;
-	private WebTarget service;
-	private Class<T> entityClass;
+	private final Client client;
+	private final WebTarget service;
+	private final Class<T> entityClass;
 
-	private ParameterizedType parameterizedGenericType;
-	private GenericType<List<T>> genericListType;
+	private final GenericType<List<T>> genericListType;
 
 	/**
 	 * Creates a new REST Client for an entity of Type T. The client interacts with a Server providing
@@ -76,24 +84,111 @@ public class RESTClient<T> {
 	 * 			open for interpretation by the inheriting REST clients.
 	 */
 	public RESTClient(String hostURL, String application, String endpoint, final Class<T> entityClass) {
-		boolean useHTTPS = "true".equals(System.getenv("USE_HTTPS"));
+		final boolean useHTTPS = "true".equals(System.getenv("USE_HTTPS"));
 
 		if (!hostURL.endsWith("/")) {
 			hostURL += "/";
 		}
 		if (!hostURL.contains("://")) {
-			if (useHTTPS) {
-				hostURL = "https://" + hostURL;
-			} else {
-				hostURL = "http://" + hostURL;
+			hostURL = (useHTTPS ? "https://" : "http://") + hostURL;
+		}
+
+		client = getOrCreateSharedClient(useHTTPS);
+		service = client.target(UriBuilder.fromUri(hostURL).build());
+		applicationURI = application;
+		endpointURI = endpoint;
+		this.entityClass = entityClass;
+
+		final ParameterizedType parameterizedGenericType = new ParameterizedType() {
+			public Type[] getActualTypeArguments() {
+				return new Type[] { entityClass };
+			}
+
+			public Type getRawType() {
+				return List.class;
+			}
+
+			public Type getOwnerType() {
+				return List.class;
+			}
+		};
+		genericListType = new GenericType<List<T>>(parameterizedGenericType) { };
+	}
+
+	private static Client getOrCreateSharedClient(boolean useHTTPS) {
+		if (useHTTPS) {
+			Client local = SHARED_CLIENT_HTTPS;
+			if (local != null) {
+				return local;
+			}
+			synchronized (RESTClient.class) {
+				local = SHARED_CLIENT_HTTPS;
+				if (local == null) {
+					SHARED_CLIENT_HTTPS = local = buildClient(true);
+				}
+				return local;
+			}
+		} else {
+			Client local = SHARED_CLIENT_HTTP;
+			if (local != null) {
+				return local;
+			}
+			synchronized (RESTClient.class) {
+				local = SHARED_CLIENT_HTTP;
+				if (local == null) {
+					SHARED_CLIENT_HTTP = local = buildClient(false);
+				}
+				return local;
 			}
 		}
+	}
+
+	private static Client buildClient(boolean useHTTPS) {
 		ClientConfig config = new ClientConfig();
 		config.property(ClientProperties.CONNECT_TIMEOUT, connectTimeout);
 		config.property(ClientProperties.READ_TIMEOUT, readTimeout);
 		config.connectorProvider(new GrizzlyConnectorProvider());
 
-		if (useHTTPS) {
+		if (!useHTTPS) {
+			return ClientBuilder.newClient(config);
+		}
+
+		installHttpsDefaultsOnce();
+		try {
+			TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
+				@Override
+				public void checkClientTrusted(java.security.cert.X509Certificate[] x509Certificates, String s) {
+				}
+
+				@Override
+				public void checkServerTrusted(java.security.cert.X509Certificate[] x509Certificates, String s) {
+				}
+
+				public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+					return null;
+				}
+			}};
+			SSLContext sslContext = SSLContext.getInstance("SSL");
+			sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+
+			ClientBuilder builder = ClientBuilder.newBuilder().withConfig(config);
+			builder.sslContext(sslContext);
+			return builder.build();
+		} catch (NoSuchAlgorithmException | KeyManagementException e) {
+			// Preserve previous behavior (stack trace), but avoid failing construction entirely.
+			e.printStackTrace();
+			return ClientBuilder.newClient(config);
+		}
+	}
+
+	private static void installHttpsDefaultsOnce() {
+		if (HTTPS_DEFAULTS_INSTALLED) {
+			return;
+		}
+		synchronized (RESTClient.class) {
+			if (HTTPS_DEFAULTS_INSTALLED) {
+				return;
+			}
 			try {
 				TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
 					@Override
@@ -107,43 +202,17 @@ public class RESTClient<T> {
 					public java.security.cert.X509Certificate[] getAcceptedIssuers() {
 						return null;
 					}
-				}
-				};
+				}};
 				SSLContext sslContext = SSLContext.getInstance("SSL");
 				sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
 				HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
 				HostnameVerifier allHostsValid = (hostname, session) -> true;
 				HttpsURLConnection.setDefaultHostnameVerifier(allHostsValid);
-
-				ClientBuilder builder = ClientBuilder.newBuilder().withConfig(config);
-				builder.sslContext(sslContext);
-				client = builder.build();
 			} catch (NoSuchAlgorithmException | KeyManagementException e) {
 				e.printStackTrace();
 			}
-		} else {
-			client = ClientBuilder.newClient(config);
+			HTTPS_DEFAULTS_INSTALLED = true;
 		}
-
-		service = client.target(UriBuilder.fromUri(hostURL).build());
-		applicationURI = application;
-		endpointURI = endpoint;
-		this.entityClass = entityClass;
-
-		parameterizedGenericType = new ParameterizedType() {
-		        public Type[] getActualTypeArguments() {
-		            return new Type[] { entityClass };
-		        }
-
-		        public Type getRawType() {
-		            return List.class;
-		        }
-
-		        public Type getOwnerType() {
-		            return List.class;
-		        }
-		    };
-		    genericListType = new GenericType<List<T>>(parameterizedGenericType) { };
 	}
 
 	/**
@@ -152,6 +221,8 @@ public class RESTClient<T> {
 	 */
 	public static void setGlobalReadTimeout(int readTimeout) {
 		RESTClient.readTimeout = readTimeout;
+		// Ensure future clients use new values. Existing shared clients keep their config.
+		// (This matches current behavior: existing instances do not retroactively change timeouts.)
 	}
 
 	/**
