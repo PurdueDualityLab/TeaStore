@@ -17,11 +17,10 @@ import org.glassfish.jersey.client.ClientConfig;
 import org.glassfish.jersey.client.ClientProperties;
 import org.glassfish.jersey.grizzly.connector.GrizzlyConnectorProvider;
 
+import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.HostnameVerifier;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.client.WebTarget;
@@ -54,6 +53,41 @@ public class RESTClient<T> {
 
 	private static int readTimeout = DEFAULT_READ_TIMEOUT;
 	private static int connectTimeout = DEFAULT_CONNECT_TIMEOUT;
+
+	/**
+	 * When USE_HTTPS is enabled, TeaStore historically disabled all certificate and
+	 * hostname verification. Keep behavior for compatibility, but avoid mutating JVM-wide
+	 * HttpsURLConnection defaults (global mutable state).
+	 */
+	private static final HostnameVerifier TRUST_ALL_HOSTNAME_VERIFIER = (hostname, session) -> true;
+	private static final TrustManager[] TRUST_ALL_CERTS = new TrustManager[] { new X509TrustManager() {
+		@Override
+		public void checkClientTrusted(java.security.cert.X509Certificate[] x509Certificates, String s) {
+		}
+
+		@Override
+		public void checkServerTrusted(java.security.cert.X509Certificate[] x509Certificates, String s) {
+		}
+
+		@Override
+		public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+			return null;
+		}
+	} };
+
+	private static final SSLContext TRUST_ALL_SSL_CONTEXT = createTrustAllSslContext();
+
+	private static SSLContext createTrustAllSslContext() {
+		try {
+			SSLContext sslContext = SSLContext.getInstance("SSL");
+			sslContext.init(null, TRUST_ALL_CERTS, new java.security.SecureRandom());
+			return sslContext;
+		} catch (NoSuchAlgorithmException | KeyManagementException e) {
+			// Preserve legacy behavior: print stack trace and fall back.
+			e.printStackTrace();
+			return null;
+		}
+	}
 
 	private String applicationURI;
 	private String endpointURI;
@@ -94,33 +128,12 @@ public class RESTClient<T> {
 		config.connectorProvider(new GrizzlyConnectorProvider());
 
 		if (useHTTPS) {
-			try {
-				TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
-					@Override
-					public void checkClientTrusted(java.security.cert.X509Certificate[] x509Certificates, String s) {
-					}
-
-					@Override
-					public void checkServerTrusted(java.security.cert.X509Certificate[] x509Certificates, String s) {
-					}
-
-					public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-						return null;
-					}
-				}
-				};
-				SSLContext sslContext = SSLContext.getInstance("SSL");
-				sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
-				HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
-				HostnameVerifier allHostsValid = (hostname, session) -> true;
-				HttpsURLConnection.setDefaultHostnameVerifier(allHostsValid);
-
-				ClientBuilder builder = ClientBuilder.newBuilder().withConfig(config);
-				builder.sslContext(sslContext);
-				client = builder.build();
-			} catch (NoSuchAlgorithmException | KeyManagementException e) {
-				e.printStackTrace();
+			ClientBuilder builder = ClientBuilder.newBuilder().withConfig(config);
+			if (TRUST_ALL_SSL_CONTEXT != null) {
+				builder.sslContext(TRUST_ALL_SSL_CONTEXT);
+				builder.hostnameVerifier(TRUST_ALL_HOSTNAME_VERIFIER);
 			}
+			client = builder.build();
 		} else {
 			client = ClientBuilder.newClient(config);
 		}
@@ -131,19 +144,20 @@ public class RESTClient<T> {
 		this.entityClass = entityClass;
 
 		parameterizedGenericType = new ParameterizedType() {
-		        public Type[] getActualTypeArguments() {
-		            return new Type[] { entityClass };
-		        }
+			public Type[] getActualTypeArguments() {
+				return new Type[] { entityClass };
+			}
 
-		        public Type getRawType() {
-		            return List.class;
-		        }
+			public Type getRawType() {
+				return List.class;
+			}
 
-		        public Type getOwnerType() {
-		            return List.class;
-		        }
-		    };
-		    genericListType = new GenericType<List<T>>(parameterizedGenericType) { };
+			public Type getOwnerType() {
+				return List.class;
+			}
+		};
+		genericListType = new GenericType<List<T>>(parameterizedGenericType) {
+		};
 	}
 
 	/**

@@ -45,6 +45,13 @@ import tools.descartes.teastore.entities.message.SessionBlob;
 public abstract class AbstractUIServlet extends HttpServlet {
 
 	private static final long serialVersionUID = 1L;
+
+	/**
+	 * Jackson ObjectMapper is thread-safe after configuration and expensive to
+	 * instantiate. Reuse a single instance to reduce per-request allocations/CPU.
+	 */
+	private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+	private static final String UTF_8 = "UTF-8";
 	/**
 	 * Text for message cookie.
 	 */
@@ -102,12 +109,12 @@ public abstract class AbstractUIServlet extends HttpServlet {
 		if (request.getCookies() != null) {
 			for (Cookie cook : request.getCookies()) {
 				if (cook.getName().equals(BLOB)) {
-					ObjectMapper o = new ObjectMapper();
 					try {
-						SessionBlob blob = o.readValue(URLDecoder.decode(cook.getValue(), "UTF-8"), SessionBlob.class);
+						SessionBlob blob = OBJECT_MAPPER.readValue(URLDecoder.decode(cook.getValue(), UTF_8),
+								SessionBlob.class);
 						if (blob != null) {
-						return blob;
-						} 
+							return blob;
+						}
 					} catch (IOException e) {
 						throw new IllegalStateException("Cookie corrupted!");
 					}
@@ -125,9 +132,8 @@ public abstract class AbstractUIServlet extends HttpServlet {
 	 * @param response servlet response
 	 */
 	protected void saveSessionBlob(SessionBlob blob, HttpServletResponse response) {
-		ObjectMapper o = new ObjectMapper();
 		try {
-			Cookie cookie = new Cookie(BLOB, URLEncoder.encode(o.writeValueAsString(blob), "UTF-8"));
+			Cookie cookie = new Cookie(BLOB, URLEncoder.encode(OBJECT_MAPPER.writeValueAsString(blob), UTF_8));
 			response.addCookie(cookie);
 		} catch (JsonProcessingException | UnsupportedEncodingException e) {
 			throw new IllegalStateException("Could not save blob!");
@@ -142,9 +148,8 @@ public abstract class AbstractUIServlet extends HttpServlet {
 	 * @param response servlet response
 	 */
 	protected void destroySessionBlob(SessionBlob blob, HttpServletResponse response) {
-		ObjectMapper o = new ObjectMapper();
 		try {
-			Cookie cookie = new Cookie(BLOB, URLEncoder.encode(o.writeValueAsString(blob), "UTF-8"));
+			Cookie cookie = new Cookie(BLOB, URLEncoder.encode(OBJECT_MAPPER.writeValueAsString(blob), UTF_8));
 			cookie.setMaxAge(0);
 			response.addCookie(cookie);
 		} catch (JsonProcessingException | UnsupportedEncodingException e) {
@@ -196,13 +201,13 @@ public abstract class AbstractUIServlet extends HttpServlet {
 		if (request.getCookies() != null) {
 			for (Cookie cook : request.getCookies()) {
 				if (cook.getName().equals(MESSAGECOOKIE)) {
-					request.setAttribute("message", cook.getValue().replaceAll("_", " "));
+					request.setAttribute("message", cook.getValue().replace('_', ' '));
 					cook.setMaxAge(0);
 					response.addCookie(cook);
 				} else if (cook.getName().equals(PRODUCTCOOKIE)) {
 					request.setAttribute("numberProducts", cook.getValue());
 				} else if (cook.getName().equals(ERRORMESSAGECOOKIE)) {
-					request.setAttribute("errormessage", cook.getValue().replaceAll("_", " "));
+					request.setAttribute("errormessage", cook.getValue().replace('_', ' '));
 					cook.setMaxAge(0);
 					response.addCookie(cook);
 				}
